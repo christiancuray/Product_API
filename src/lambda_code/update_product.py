@@ -1,7 +1,9 @@
+# update_product.py - Handler for PUT /products/{id}
+
 import json
-from response_utils import create_success_response, create_error_response
-from products_db import update_product
-from product_schema import ProductInput
+from utils.response_utils import create_success_response, create_error_response
+from db.products_db import update_product
+from utils.product_schema import ProductInput
 from pydantic import ValidationError
 
 def handler(event, context):
@@ -16,10 +18,11 @@ def handler(event, context):
         
         # Validate input using Pydantic
         product_input = ProductInput(**raw_data)
-        validated_data = product_input.dict()
+        validated_data = product_input.model_dump()
         
         # Extract user ARN from request context
-        user_arn = event.get('requestContext', {}).get('identity', {}).get('userArn', 'unknown')
+        identity = event.get('requestContext', {}).get('identity') or {}
+        user_arn = identity.get('userArn') or 'unknown'
         
         # Update in DynamoDB
         updated = update_product(product_id, validated_data, user_arn)

@@ -1,6 +1,6 @@
 # get_product.py - Handler for GET /products/{id}
-from response_utils import create_success_response, create_error_response
-import products_db as products_db
+from utils.response_utils import create_success_response, create_error_response
+from db.products_db import get_product
 import traceback
 
 def handler(event, context):
@@ -9,7 +9,7 @@ def handler(event, context):
         product_id = path_parameters.get('id')
         
         if product_id:
-            product = products_db.get_product(product_id)
+            product = get_product(product_id)
             if product:
                 return create_success_response(200, product)
             else:

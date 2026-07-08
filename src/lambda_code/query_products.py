@@ -1,5 +1,7 @@
-from response_utils import create_success_response, create_error_response
-from products_db import get_products_by_category, get_all_products
+# query_products.py - Handler for GET /products
+
+from utils.response_utils import create_error_response, create_success_response
+from db.products_db import get_products_by_category, get_all_products
 
 def handler(event, context):
     path_parameters = event.get('pathParameters') or {}

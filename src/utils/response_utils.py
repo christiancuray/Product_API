@@ -13,6 +13,16 @@ def create_success_response(status_code, data):
         'body': json.dumps(data, default=decimal_serializer)
     }
 
+def create_error_response(status_code, msg):
+    return {
+        'statusCode': status_code,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+        },
+        'body': json.dumps({'error': msg}, default=decimal_serializer)
+    }
+
 def decimal_serializer(obj):
     """Handle Decimal objects in JSON serialization"""
     if isinstance(obj, Decimal):
