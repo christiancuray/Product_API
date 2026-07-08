@@ -8,3 +8,7 @@ __pycache__
 .cdk.staging
 cdk.out
 .env
+# Lambda layer dependencies
+layer/python
+.aws
+template.yaml
