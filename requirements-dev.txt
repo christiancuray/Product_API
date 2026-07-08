@@ -1,1 +1,8 @@
 pytest==8.4.2
+moto[dynamodb]==4.2.0
+boto3==1.28.0
+
+#pytest: Modern testing framework with powerful fixtures and assertions
+# moto: AWS service mocking library. You can simulate DynamoDB, S3, and other services
+# boto3: AWS SDK for Python (same version as your Lambda runtime)
+# unittest-mock: Built-in mocking capabilities. You can isolate dependencies
