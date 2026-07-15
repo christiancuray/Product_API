@@ -10,5 +10,8 @@ cdk.out
 .env
 # Lambda layer dependencies
 layer/python
-.aws
+
+
+.aws-sam
 template.yaml
+.coverage

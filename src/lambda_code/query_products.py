@@ -4,6 +4,7 @@ from utils.response_utils import create_error_response, create_success_response
 from db.products_db import get_products_by_category, get_all_products
 
 def handler(event, context):
+    # extract query parameters and path parameters from the event
     path_parameters = event.get('pathParameters') or {}
     try:
         query_parameters = event.get('queryStringParameters') or {}
