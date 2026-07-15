@@ -6,12 +6,6 @@ import boto3
 from decimal import Decimal
 from moto import mock_dynamodb
 
-repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-src_root = os.path.join(repo_root, "src")
-for path in (repo_root, src_root):
-    if path not in sys.path:
-        sys.path.insert(0, path)
-
 os.environ["TABLE_NAME"] = "Products"
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 # amazonq-ignore-next-line
@@ -55,7 +49,7 @@ def dynamodb_table():
     module-level boto3 resource binds to the mock endpoint."""
     with mock_dynamodb():
         client = boto3.resource("dynamodb", region_name="us-east-1")
-        table = client.create_table(
+        table = client.create_table(  # type: ignore[attr-defined]
             TableName=TABLE_NAME,
             KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}],
             AttributeDefinitions=[

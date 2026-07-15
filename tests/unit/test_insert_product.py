@@ -1,28 +1,13 @@
-import os
-import sys
 import json
 import pytest
-from unittest.mock import patch, MagicMock
-
-repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
-src_root = os.path.join(repo_root, 'src')
-for path in (repo_root, src_root):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+from unittest.mock import patch
+from tests.unit.conftest import APIGatewayEventFactory
 
 from src.lambda_code.insert_product import handler
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def make_event(body: dict | None = None, raw_body: str | None = None, user_arn: str = "arn:aws:iam::123456789012:user/test"):
-    return {
-        "httpMethod": "POST",
-        "body": raw_body if raw_body is not None else (json.dumps(body) if body is not None else None),
-        "requestContext": {"identity": {"userArn": user_arn}},
-    }
+def make_event(body=None, raw_body=None, user_arn="arn:aws:iam::123456789012:user/test"):
+    return APIGatewayEventFactory.create_post_product_event(body, user_arn=user_arn, raw_body=raw_body)
 
 
 VALID_PRODUCT = {
@@ -89,7 +74,9 @@ class TestValidationErrors:
         response = handler(make_event(product_with_id), None)
 
         assert response["statusCode"] == 400
-        assert "Product id is not allowed" in json.loads(response["body"])["error"]
+        body = json.loads(response["body"])
+        assert body["error"]["type"] == "validation_error"
+        assert "Product id is not allowed" in body["error"]["details"]["id"]
         mock_insert.assert_not_called()
 
     @patch("src.lambda_code.insert_product.insert_product")

@@ -1,10 +1,62 @@
 import os
 import sys
 import importlib
+import json
 import pytest
 import boto3
 from decimal import Decimal
 from moto import mock_dynamodb
+
+
+class APIGatewayEventFactory:
+    """Factory for creating API Gateway events for testing."""
+
+    @staticmethod
+    def create_get_product_event(product_id, query_params=None):
+        return {
+            'httpMethod': 'GET',
+            'path': f'/products/{product_id}',
+            'pathParameters': {'id': product_id},
+            'queryStringParameters': query_params,
+            'headers': {'Content-Type': 'application/json'},
+            'body': None,
+            'isBase64Encoded': False,
+        }
+
+    @staticmethod
+    def create_post_product_event(product_data, user_arn="arn:aws:iam::123456789012:user/test", raw_body=None):
+        return {
+            'httpMethod': 'POST',
+            'path': '/products',
+            'pathParameters': None,
+            'queryStringParameters': None,
+            'headers': {'Content-Type': 'application/json'},
+            'body': raw_body if raw_body is not None else (json.dumps(product_data) if product_data is not None else None),
+            'isBase64Encoded': False,
+            'requestContext': {'identity': {'userArn': user_arn}},
+        }
+
+    @staticmethod
+    def create_query_products_event(category=None, limit=None):
+        query_params = {}
+        if category:
+            query_params['category'] = category
+        if limit:
+            query_params['limit'] = str(limit)
+        return {
+            'httpMethod': 'GET',
+            'path': '/products',
+            'pathParameters': None,
+            'queryStringParameters': query_params or None,
+            'headers': {'Content-Type': 'application/json'},
+            'body': None,
+            'isBase64Encoded': False,
+        }
+
+
+@pytest.fixture
+def api_event_factory():
+    return APIGatewayEventFactory
 
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 src_root = os.path.join(repo_root, "src")
@@ -54,7 +106,7 @@ def dynamodb_table():
     boto3 resource binds to the mock endpoint instead of real AWS."""
     with mock_dynamodb():
         resource = boto3.resource("dynamodb", region_name="us-east-1")
-        table = resource.create_table(
+        table = resource.create_table(  # type: ignore[attr-defined]
             TableName=TABLE_NAME,
             KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}],
             AttributeDefinitions=[
