@@ -49,4 +49,4 @@ def handler(event, context):
 
         except Exception as e:
             # Log and continue so one bad record doesn't block the rest of the batch
-            logger.error(f"Error processing DLQ record: {str(e)}")
+            logger.exception(f"Error processing DLQ record: {str(e)}")
