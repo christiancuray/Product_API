@@ -1,6 +1,6 @@
 import os
-from aws_cdk import Stack, aws_lambda, aws_apigateway as apigw, aws_dynamodb as dynamodb, aws_sqs as sqs, Duration
-from aws_cdk import aws_iam as iam
+from typing import cast
+from aws_cdk import Stack, aws_lambda, aws_lambda_destinations as destinations, aws_apigateway as apigw, aws_dynamodb as dynamodb, aws_sqs as sqs, Duration, aws_iam as iam
 from aws_cdk.aws_lambda_event_sources import SqsEventSource
 
 from constructs import Construct
@@ -28,6 +28,24 @@ class ProductApiStack(Stack):
             receive_message_wait_time=Duration.seconds(20), # 20 seconds
         )
 
+        # Queue for successful asynchronous Lambda invocation routing
+        success_queue = sqs.Queue(
+            self, "ProductApiSuccessQueue",
+            queue_name="product-api-success-queue",
+            retention_period=Duration.days(14),
+            visibility_timeout=Duration.minutes(5),
+            receive_message_wait_time=Duration.seconds(20),
+        )
+
+        success_destination: aws_lambda.IDestination = cast(
+            aws_lambda.IDestination,
+            destinations.SqsDestination(success_queue)
+        )
+        failure_destination: aws_lambda.IDestination = cast(
+            aws_lambda.IDestination,
+            destinations.SqsDestination(dlq)
+        )
+
         # Shared runtime and code location for all Lambda functions
         lambda_runtime = aws_lambda.Runtime.PYTHON_3_12
         code_location = os.path.join(ROOT_DIR, "src")
@@ -48,7 +66,10 @@ class ProductApiStack(Stack):
                 "TABLE_NAME": product_table.table_name
             },
             layers=[dependency_layer],
-            dead_letter_queue=dlq  # sends failed async invocations to DLQ
+            on_success=success_destination,
+            on_failure=failure_destination,
+            retry_attempts=2,
+            max_event_age=Duration.hours(1)
         )
         product_table.grant_read_data(self.get_product)
 
@@ -61,7 +82,10 @@ class ProductApiStack(Stack):
                 "TABLE_NAME": product_table.table_name
             },
             layers=[dependency_layer],
-            dead_letter_queue=dlq  # sends failed async invocations to DLQ
+            on_success=success_destination,
+            on_failure=failure_destination,
+            retry_attempts=2,
+            max_event_age=Duration.hours(1)
         )
         product_table.grant_read_data(self.query_products)
 
@@ -74,7 +98,10 @@ class ProductApiStack(Stack):
                 "TABLE_NAME": product_table.table_name
             },
             layers=[dependency_layer],
-            dead_letter_queue=dlq  # sends failed async invocations to DLQ
+            on_success=success_destination,
+            on_failure=failure_destination,
+            retry_attempts=2,
+            max_event_age=Duration.hours(1)
         )
         product_table.grant_read_write_data(self.insert_product)
 
@@ -87,7 +114,10 @@ class ProductApiStack(Stack):
                 "TABLE_NAME": product_table.table_name
             },
             layers=[dependency_layer],
-            dead_letter_queue=dlq  # sends failed async invocations to DLQ
+            on_success=success_destination,
+            on_failure=failure_destination,
+            retry_attempts=2,
+            max_event_age=Duration.hours(1)
         )
         product_table.grant_read_write_data(self.update_product)
         
