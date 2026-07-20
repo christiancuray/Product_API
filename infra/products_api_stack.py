@@ -2,15 +2,21 @@ import os
 from typing import cast
 from aws_cdk import Stack, aws_lambda, aws_lambda_destinations as destinations, aws_apigateway as apigw, aws_dynamodb as dynamodb, aws_sqs as sqs, Duration, aws_iam as iam
 from aws_cdk.aws_lambda_event_sources import SqsEventSource
-
+from .policy_documents.iam_policies import s3_policy_document
+from infra.s3_bucket import create_product_images_bucket
 from constructs import Construct
 
 # the repo root relative to this file so asset paths work from any working directory
 ROOT_DIR = os.path.join(os.path.dirname(__file__), "..")
-
+s3_bucket_name = os.environ.get("S3_BUCKET_NAME", "products-api-assets")
 class ProductApiStack(Stack):
     def __init__(self, scope, construct_id, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
+        # IAM policy for lambda functions to access s3 bucket 
+        s3_policy = iam.Policy(self, "s3AccessPolicy", document=s3_policy_document)
+
+        # Create S3 bucket for product images
+        self.s3_bucket = create_product_images_bucket(self, s3_bucket_name)
 
         # Create DynamoDB table for products
         product_table = dynamodb.Table(
@@ -72,6 +78,8 @@ class ProductApiStack(Stack):
             max_event_age=Duration.hours(1)
         )
         product_table.grant_read_data(self.get_product)
+        if self.get_product.role:
+            self.get_product.role.attach_inline_policy(s3_policy)
 
         # Create Lambda function for querying products by category or listing all
         self.query_products = aws_lambda.Function(self, "QueryProducts",
@@ -88,6 +96,8 @@ class ProductApiStack(Stack):
             max_event_age=Duration.hours(1)
         )
         product_table.grant_read_data(self.query_products)
+        if self.query_products.role:
+            self.query_products.role.attach_inline_policy(s3_policy)
 
         # Create Lambda function for product creation
         self.insert_product = aws_lambda.Function(self, "InsertProduct",
@@ -104,6 +114,8 @@ class ProductApiStack(Stack):
             max_event_age=Duration.hours(1)
         )
         product_table.grant_read_write_data(self.insert_product)
+        if self.insert_product.role:
+            self.insert_product.role.attach_inline_policy(s3_policy)
 
         # Create Lambda function for product updates
         self.update_product = aws_lambda.Function(self, "UpdateProduct",
@@ -119,6 +131,8 @@ class ProductApiStack(Stack):
             retry_attempts=2,
             max_event_age=Duration.hours(1)
         )
+        if self.update_product.role:
+            self.update_product.role.attach_inline_policy(s3_policy)
         product_table.grant_read_write_data(self.update_product)
         
         # DLQ processor Lambda — triggered by messages in the DLQ

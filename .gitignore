@@ -15,3 +15,4 @@ layer/python
 .aws-sam
 template.yaml
 .coverage
+.github
