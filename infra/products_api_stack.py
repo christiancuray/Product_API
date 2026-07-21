@@ -69,7 +69,8 @@ class ProductApiStack(Stack):
             handler="lambda_code.get_product.handler",
             code=aws_lambda.Code.from_asset(code_location),
             environment={
-                "TABLE_NAME": product_table.table_name
+                "TABLE_NAME": product_table.table_name,
+                "S3_BUCKET_NAME": self.s3_bucket.bucket_name,
             },
             layers=[dependency_layer],
             on_success=success_destination,
@@ -80,6 +81,7 @@ class ProductApiStack(Stack):
         product_table.grant_read_data(self.get_product)
         if self.get_product.role:
             self.get_product.role.attach_inline_policy(s3_policy)
+        self.s3_bucket.grant_read(self.get_product)
 
         # Create Lambda function for querying products by category or listing all
         self.query_products = aws_lambda.Function(self, "QueryProducts",
@@ -134,6 +136,25 @@ class ProductApiStack(Stack):
         if self.update_product.role:
             self.update_product.role.attach_inline_policy(s3_policy)
         product_table.grant_read_write_data(self.update_product)
+
+        # Create Lambda function to issue presigned upload URLs for product images
+        self.generate_upload_url = aws_lambda.Function(self, "GenerateUploadUrl",
+            runtime=lambda_runtime,
+            handler="lambda_code.generate_upload_url.handler",
+            code=aws_lambda.Code.from_asset(code_location),
+            environment={
+                "S3_BUCKET_NAME": self.s3_bucket.bucket_name,
+            },
+            layers=[dependency_layer],
+            on_success=success_destination,
+            on_failure=failure_destination,
+            retry_attempts=2,
+            max_event_age=Duration.hours(1)
+        )
+        if self.generate_upload_url.role:
+            self.generate_upload_url.role.attach_inline_policy(s3_policy)
+        self.s3_bucket.grant_put(self.generate_upload_url)
+        self.s3_bucket.grant_read(self.generate_upload_url)
         
         # DLQ processor Lambda — triggered by messages in the DLQ
         dlq_processor = aws_lambda.Function(self, "DlqProcessor",
@@ -164,3 +185,7 @@ class ProductApiStack(Stack):
         product_by_id = products.add_resource("{id}")
         product_by_id.add_method("GET", apigw.LambdaIntegration(self.get_product))  # type: ignore
         product_by_id.add_method("PUT", apigw.LambdaIntegration(self.update_product))  # type: ignore
+
+        # /products/{id}/upload-url — generate a presigned S3 upload URL
+        upload_url = product_by_id.add_resource("upload-url")
+        upload_url.add_method("POST", apigw.LambdaIntegration(self.generate_upload_url))  # type: ignore
