@@ -1,6 +1,6 @@
 import logging
 
-from aws_cdk import RemovalPolicy, aws_s3 as s3
+from aws_cdk import Duration, RemovalPolicy, aws_s3 as s3
 from constructs import Construct
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,24 @@ def create_product_images_bucket(scope: Construct, id: str) -> s3.Bucket:
         encryption=s3.BucketEncryption.S3_MANAGED,
         removal_policy=RemovalPolicy.DESTROY,
         auto_delete_objects=True,
+        lifecycle_rules=[
+            s3.LifecycleRule(
+                id="ProductImageLifecycle",
+                enabled=True,
+                prefix="products/",
+                expiration=Duration.days(2555),
+                transitions=[
+                    s3.Transition(
+                        storage_class=s3.StorageClass.INFREQUENT_ACCESS,
+                        transition_after=Duration.days(30),
+                    ),
+                    s3.Transition(
+                        storage_class=s3.StorageClass.GLACIER,
+                        transition_after=Duration.days(90),
+                    ),
+                ],
+            )
+        ],
     )
 
     logger.info("Created S3 bucket %s", bucket.bucket_name)
