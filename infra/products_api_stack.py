@@ -1,6 +1,6 @@
 import os
 from typing import cast
-from aws_cdk import Stack, aws_lambda, aws_lambda_destinations as destinations, aws_apigateway as apigw, aws_dynamodb as dynamodb, aws_sqs as sqs, Duration, aws_iam as iam
+from aws_cdk import Stack, aws_lambda, aws_lambda_destinations as destinations, aws_apigateway as apigw, aws_dynamodb as dynamodb, aws_sqs as sqs, Duration, aws_iam as iam, aws_s3 as s3, aws_s3_notifications as s3_notification
 from aws_cdk.aws_lambda_event_sources import SqsEventSource
 from .policy_documents.iam_policies import s3_policy_document
 from infra.s3_bucket import create_product_images_bucket
@@ -155,6 +155,29 @@ class ProductApiStack(Stack):
             self.generate_upload_url.role.attach_inline_policy(s3_policy)
         self.s3_bucket.grant_put(self.generate_upload_url)
         self.s3_bucket.grant_read(self.generate_upload_url)
+
+        process_upload_image = aws_lambda.Function(self, "ProcessUploadImage",
+            runtime=lambda_runtime,
+            handler="lambda_code.process_upload_image.handler",
+            code=aws_lambda.Code.from_asset(code_location),
+            environment={
+                "TABLE_NAME": product_table.table_name,
+                "S3_BUCKET_NAME": self.s3_bucket.bucket_name,
+            },
+            layers=[dependency_layer],
+            on_success=success_destination,
+            on_failure=failure_destination,
+            retry_attempts=2,
+            max_event_age=Duration.hours(1)
+        )
+        product_table.grant_read_write_data(process_upload_image)
+        self.s3_bucket.grant_read(process_upload_image)
+        self.s3_bucket.grant_put(process_upload_image)
+        self.s3_bucket.add_event_notification(
+            s3.EventType.OBJECT_CREATED,
+            s3_notification.LambdaDestination(cast(aws_lambda.IFunction, process_upload_image)),
+            s3.NotificationKeyFilter(prefix="products/", suffix=".jpg"),
+        )
         
         # DLQ processor Lambda — triggered by messages in the DLQ
         dlq_processor = aws_lambda.Function(self, "DlqProcessor",
