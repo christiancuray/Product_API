@@ -16,3 +16,4 @@ layer/python
 template.yaml
 .coverage
 .github
+cdk.context.json

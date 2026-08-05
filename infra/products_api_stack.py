@@ -1,10 +1,12 @@
 import os
 from typing import cast
 from aws_cdk import Stack, aws_lambda, aws_lambda_destinations as destinations, aws_apigateway as apigw, aws_dynamodb as dynamodb, aws_sqs as sqs, Duration, aws_iam as iam, aws_s3 as s3, aws_s3_notifications as s3_notification
+from aws_cdk import Stack, aws_lambda, aws_lambda_destinations as destinations, aws_apigateway as apigw, aws_dynamodb as dynamodb, aws_sqs as sqs, Duration, aws_iam as iam, aws_s3 as s3, aws_s3_notifications as s3_notification, aws_ec2 as ec2, aws_elasticache as elasticache, CfnOutput
 from aws_cdk.aws_lambda_event_sources import SqsEventSource
 from .policy_documents.iam_policies import s3_policy_document
 from infra.s3_bucket import create_product_images_bucket
 from constructs import Construct
+
 
 # the repo root relative to this file so asset paths work from any working directory
 ROOT_DIR = os.path.join(os.path.dirname(__file__), "..")
@@ -12,8 +14,47 @@ s3_bucket_name = os.environ.get("S3_BUCKET_NAME", "products-api-assets")
 class ProductApiStack(Stack):
     def __init__(self, scope, construct_id, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
+
         # IAM policy for lambda functions to access s3 bucket 
         s3_policy = iam.Policy(self, "s3AccessPolicy", document=s3_policy_document)
+
+        # ElastiCache Cluster
+        # Define a VPC for the ElastiCache cluster 
+        vpc = ec2.Vpc(self, "ProductApiVPC",
+            max_azs=2,  # Deploy across 2 Availability Zones
+            nat_gateways=1, # One NAT Gateway for outbound internet access from private subnets
+            subnet_configuration=[
+                ec2.SubnetConfiguration(
+                    name="Public",
+                    subnet_type=ec2.SubnetType.PUBLIC,
+                    cidr_mask=24
+                ),
+                ec2.SubnetConfiguration(
+                    name="Private",
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
+                    cidr_mask=24
+                )
+            ]
+        )
+
+        # Security Group for ElastiCache - allows access from within the VPC
+        elasticache_security_group = ec2.SecurityGroup(self, "ElastiCacheSecurityGroup",
+            vpc=vpc,
+            description="Allow access to ElastiCache from within the VPC",
+            allow_all_outbound=True
+        )
+        # Allow inbound connections on the ElastiCache port from within the VPC
+        elasticache_security_group.add_ingress_rule(
+            ec2.Peer.ipv4(vpc.vpc_cidr_block),
+            ec2.Port.tcp(6379),  # default port for redis/valkey
+            "Allow inbound from VPC"
+        )
+
+        # ElastiCache Subnet Group
+        elasticache_subnet_group = elasticache.CfnSubnetGroup(self, "ElastiCacheSubnetGroup",
+            description="Subnet group for ElastiCache",
+            subnet_ids=vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS).subnet_ids
+        )
 
         # Create S3 bucket for product images
         self.s3_bucket = create_product_images_bucket(self, s3_bucket_name)
@@ -25,6 +66,25 @@ class ProductApiStack(Stack):
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST
         )
 
+        # ElastiCache Cluster
+        # Using CfnCacheCluster for more direct control and access to attributes like endpoint address
+        elasticache_cluster = elasticache.CfnReplicationGroup(self, "OnlineStoreValkeyCache",
+            engine="valkey", # Or 'redis' if you prefer
+            replication_group_description="Online Store Cache",
+            cache_node_type="cache.t3.micro",
+            num_cache_clusters=1,
+            port=6379, # Default port for Valkey/Redis
+            security_group_ids=[elasticache_security_group.security_group_id],
+            cache_subnet_group_name=elasticache_subnet_group.ref,
+            automatic_failover_enabled=False,
+            transit_encryption_enabled=False # false for testing ( not secured )
+        )
+
+        # Output the ElastiCache endpoint
+        CfnOutput(self, "ElastiCacheEndpoint",
+            value=elasticache_cluster.attr_primary_end_point_address,
+            description="ElastiCache Cluster Endpoint Address"
+        )
         # Dead-letter queue for failed Lambda invocations
         dlq = sqs.Queue(
             self, "ProductApiDLQ",
@@ -198,7 +258,6 @@ class ProductApiStack(Stack):
 
         # API Gateway REST API — routes HTTP requests to the appropriate Lambda functions
         api = apigw.RestApi(self, "ProductsAPI")
-
         # /products — GET lists all, POST creates a new product
         products = api.root.add_resource("products")
         products.add_method("GET", apigw.LambdaIntegration(self.query_products))  # type: ignore
@@ -212,3 +271,10 @@ class ProductApiStack(Stack):
         # /products/{id}/upload-url — generate a presigned S3 upload URL
         upload_url = product_by_id.add_resource("upload-url")
         upload_url.add_method("POST", apigw.LambdaIntegration(self.generate_upload_url))  # type: ignore
+
+        # TODO: If your Lambda functions need to connect to ElastiCache,
+        # you'll need to update their VPC configuration and add permissions.
+        # Example:
+        # self.get_product.connections.allow_to(elasticache_security_group, ec2.Port.tcp(6379), "Allow Lambda to ElastiCache")
+        # self.get_product.add_environment("ELASTICACHE_ENDPOINT", elasticache_cluster.attr_redis_endpoint_address)
+        # self.get_product.add_environment("ELASTICACHE_PORT", str(elasticache_cluster.port))
