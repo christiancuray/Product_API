@@ -8,11 +8,50 @@ from botocore.exceptions import ClientError
 from db.products_db import get_product
 from utils.context_error_handler import ContextualErrorHandler
 from utils.response_utils import create_error_response, create_success_response
+from db.valkey_client import get_valkey_client
+import json
+import redis
 
 logger = logging.getLogger(__name__)
 
 s3_client = boto3.client('s3')
+dynamodb_client = boto3.client('dynamodb')
+table = dynamodb_client.Table(os.environ['TABLE_NAME'])
 
+def get_product_with_cache(product_id):
+    """lookup the product in cache"""
+    cache_key = f"product:{product_id}"
+
+    try:
+        # try cache first
+        cached_product = get_valkey_client().get(cache_key)
+        if cached_product:
+            # if the product exists in cache, return it
+            logger.info("product found in cache", extra={"product_id": product_id})
+            return json.loads(cached_product)
+        else:
+            # cache missed
+            logger.info("cache miss", extra={"product_id": product_id})
+            product = get_product_from_dynamodb(product_id)
+
+            if product:
+                #store the product in cache with 1 hour TTL
+                get_valkey_client().setex(cache_key, 3600, json.dumps(product))
+                logger.info("product stored in cache", extra={"product_id": product_id})
+
+            return product
+    except redis.RedisError as e:
+        logger.exception('Redis error while accessing cache', exc_info=True)
+        # Fallback to database if cache fails
+        return get_product_from_dynamodb(product_id)     
+
+def get_product_from_dynamodb(product_id):
+    try:
+        res = table.get_item(Key={'id': product_id})
+        return res.get('Item')
+    except ClientError as e:
+        logger.exception('DunamoDB error while accessing product', exc_info=True)
+        return None
 
 def _attach_download_url(product):
     image_key = product.get('image_key') or product.get('imageUrl') or product.get('image_url')
